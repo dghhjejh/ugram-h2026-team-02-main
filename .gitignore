@@ -1,0 +1,25 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Local Development
+.env
+bin/
+
+# Node / frontend
+node_modules/
+frontend/node_modules/
+package-lock.json
+pnpm-debug.log
+npm-debug.log
+
+# Terraform
+.terraform/
+*.tfstate*

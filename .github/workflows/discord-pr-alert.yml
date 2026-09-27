@@ -1,0 +1,112 @@
+name: Discord PR Alert
+
+on:
+  pull_request:
+    types: [opened, reopened, closed, ready_for_review]
+
+jobs:
+  notify:
+    if: ${{ github.event.pull_request.draft == false && github.actor != 'dependabot[bot]' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Discord Notification
+        shell: bash
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_AVATAR_URL: ${{ github.event.pull_request.user.avatar_url }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_ACTION: ${{ github.event.action }}
+          PR_CREATED_AT: ${{ github.event.pull_request.created_at }}
+          PR_UPDATED_AT: ${{ github.event.pull_request.updated_at }}
+          REPO_NAME: ${{ github.repository }}
+          REPO_OWNER: ${{ github.repository_owner }}
+          PR_MERGED: ${{ github.event.pull_request.merged }}
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          PR_MERGED_BY: ${{ github.event.pull_request.merged_by.login }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_ADDITIONS: ${{ github.event.pull_request.additions }}
+          PR_DELETIONS: ${{ github.event.pull_request.deletions }}
+          PR_MERGED_AT: ${{ github.event.pull_request.merged_at }}
+        run: |
+          case "$PR_ACTION" in
+            opened|ready_for_review)
+              STATUS="Pull request opened"
+              COLOR=5763719
+              ;;
+            closed)
+              STATUS="Pull request closed"
+              COLOR=16712987
+              ;;
+            reopened)
+              STATUS="Pull request reopened"
+              COLOR=26623
+              ;;
+            *)
+              STATUS="PR Event"
+              COLOR=15105570
+              ;;
+          esac
+
+          SHORT_REPO="${REPO_NAME#${REPO_OWNER}/}"
+          PR_PATH="https://github.com/$REPO_NAME/pull/$PR_NUMBER"
+          PR_EFFECTIVE_AT="${PR_UPDATED_AT:-$PR_CREATED_AT}"
+          PR_CREATED_TS=$(date -d "$PR_EFFECTIVE_AT" +%s)
+          REVIEW_TS=$((PR_CREATED_TS + 172800))
+          REVIEW_BY_DATE=$(TZ="America/Toronto" date -d @"$REVIEW_TS" '+%B %d, %Y %I:%M %p %Z')
+          FOOTER="Must be reviewed by: $REVIEW_BY_DATE"
+          DESCRIPTION="\`$PR_HEAD_REF\` ⟶ \`$PR_BASE_REF\`"
+          if [[ "$PR_ACTION" == "closed" && "$PR_MERGED" == "true" ]]; then
+            STATUS="Pull request merged"
+            COLOR=8390073
+            FOOTER=""
+          fi
+          FIELDS='[]'
+          if [[ "$PR_ACTION" != "closed" ]]; then
+            FIELDS='[
+              {
+                "name": "PR Summary",
+                "value": "```diff\n+'"$PR_ADDITIONS"' additions\n-'"$PR_DELETIONS"' deletions\n```",
+                "inline": false
+              }
+            ]'
+          fi
+
+          # Send message to Discord
+          jq -nc \
+          --arg uname "$PR_AUTHOR" \
+          --arg title "$PR_TITLE" \
+          --arg url "$PR_PATH" \
+          --arg status "$STATUS" \
+          --arg repo "$SHORT_REPO" \
+          --arg pravatar "$PR_AVATAR_URL" \
+          --arg pr_number "$PR_NUMBER" \
+          --arg description "$DESCRIPTION" \
+          --arg base "$PR_BASE_REF" \
+          --arg head "$PR_HEAD_REF" \
+          --arg footer "$FOOTER" \
+          --argjson fields "$FIELDS" \
+          --argjson color "$COLOR" \
+          '{
+            username: "GitHub",
+            avatar_url: "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png",
+            embeds: [
+              {
+                author: {
+                  name: $uname,
+                  icon_url: $pravatar
+                },
+                title: "[\($repo)] \($status): #\($pr_number) PR: \($title)",
+                description: $description,
+                fields: $fields,
+                footer: { text: $footer },
+                url: $url,
+                color: $color
+              }
+            ]
+          }' \
+          | curl -X POST "$DISCORD_WEBHOOK?wait=true" \
+               -H "Content-Type: application/json" \
+               -d @-

@@ -1,0 +1,60 @@
+name: terraform-plan
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+    branches:
+      - main
+    paths:
+      - "infra/**"
+      - ".github/workflows/**"
+
+jobs:
+  plan-dev:
+    runs-on: ubuntu-latest
+    env:
+      PROJECT_NAME: ugram
+      DEPLOY_ENV: dev
+    defaults:
+      run:
+        working-directory: infra
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.9.7
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Terraform fmt (check)
+        run: terraform fmt -check -recursive
+
+      - name: Terraform init (dev)
+        run: terraform init -backend-config=backend/dev.hcl -reconfigure
+
+      - name: Terraform validate
+        run: terraform validate
+
+      - name: Load Terraform secrets from AWS SSM
+        working-directory: .
+        run: |
+          set -euo pipefail
+          backend_secret_key_value="$(aws ssm get-parameter --name "/${PROJECT_NAME}/${DEPLOY_ENV}/backend/SECRET_KEY" --with-decryption --query 'Parameter.Value' --output text)"
+          backend_google_client_secret_value="$(aws ssm get-parameter --name "/${PROJECT_NAME}/${DEPLOY_ENV}/backend/GOOGLE_CLIENT_SECRET" --with-decryption --query 'Parameter.Value' --output text)"
+          backend_image_tag="$(aws ssm get-parameter --name "/${PROJECT_NAME}/${DEPLOY_ENV}/backend/IMAGE_TAG" --query 'Parameter.Value' --output text 2>/dev/null || printf 'latest')"
+          echo "TF_VAR_backend_secret_key_value=${backend_secret_key_value}" >> "$GITHUB_ENV"
+          echo "TF_VAR_backend_google_client_secret_value=${backend_google_client_secret_value}" >> "$GITHUB_ENV"
+          echo "TF_VAR_backend_image_tag=${backend_image_tag}" >> "$GITHUB_ENV"
+
+      - name: Terraform plan (dev)
+        run: terraform plan -var-file=dev.tfvars -var "backend_image_tag=${TF_VAR_backend_image_tag}" -no-color

@@ -1,0 +1,43 @@
+[project]
+name = "backend"
+version = "0.1.0"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "sqlalchemy",
+    "pydantic-settings",
+    "pydantic[email]",
+    "email-validator",
+    "psycopg2-binary",
+    "pyjwt[crypto]>=2.0.0",
+    "boto3",
+    "python-dotenv",
+    "pwdlib[argon2]",
+    "python-multipart>=0.0.21",
+    "httpx>=0.28.1",
+    "sentry-sdk>=2.54.0",
+    "alembic>=1.13.0",
+    "pillow>=11.0.0",
+    "sse-starlette>=3.3.4",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["src"]
+branch = true
+relative_files = true
+
+[tool.coverage.report]
+show_missing = true
+
+[tool.mypy]
+warn_unused_ignores = false
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pytest>=9.0.2",
+]

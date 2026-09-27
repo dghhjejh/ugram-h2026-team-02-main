@@ -1,0 +1,22 @@
+{
+    "python.defaultInterpreterPath": ".venv/bin/python",
+    "python.analysis.typeCheckingMode": "strict",
+    "python.analysis.autoImportCompletions": true,
+    "python.terminal.useEnvFile": true,
+    "[python]": {
+        "editor.defaultFormatter": "charliermarsh.ruff",
+        "editor.codeActionsOnSave": {
+            "source.organizeImports": "explicit"
+        }
+    },
+    "ruff.interpreter": [
+        ".venv/bin/python"
+    ],
+    "mypy-type-checker.interpreter": [
+        ".venv/bin/python"
+    ],
+    "mypy-type-checker.args": [
+        "--config-file=pyproject.toml"
+    ],
+    "makefile.configureOnOpen": false
+}

@@ -1,0 +1,25 @@
+# CODEOWNERS - Define code ownership for automatic review requests
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owners for everything in the repo
+* @charlespoulin
+
+# Python source code
+/src/ @charlespoulin
+
+# Tests require review
+/tests/ @your-username
+
+# CI/CD workflows - critical changes
+/.github/workflows/ @your-username
+
+# Security policy changes
+SECURITY.md @your-username
+
+# Dependency changes
+pyproject.toml @your-username
+uv.lock @your-username
+
+# Documentation
+/docs/ @your-username
+README.md @your-username

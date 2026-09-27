@@ -1,0 +1,55 @@
+name: Release
+
+on:
+  workflow_dispatch:
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    concurrency: release
+    permissions:
+      id-token: write
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Set up Python
+        run: uv python install 3.13
+
+      - name: Install dependencies
+        run: uv sync --all-extras --dev
+
+      - name: Setup Git User
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Bump version and create changelog
+        id: cz
+        run: uv run cz bump --yes
+        continue-on-error: true
+
+      - name: Get Release Tag
+        id: get_tag
+        if: steps.cz.outcome == 'success'
+        run: echo "REVISION=$(git describe --tags --abbrev=0)" >> $GITHUB_ENV
+
+      - name: Push Code and Tags
+        if: steps.cz.outcome == 'success'
+        run: |
+          git push origin HEAD:main
+          git push origin --tags
+
+      - name: Create Release
+        if: steps.cz.outcome == 'success'
+        uses: softprops/action-gh-release@v3
+        with:
+          body_path: "CHANGELOG.md"
+          tag_name: ${{ env.REVISION }}

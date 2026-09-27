@@ -1,0 +1,458 @@
+version: '3'
+
+tasks:
+  default:
+    cmds:
+      - task --list
+
+  # ==================== Project Setup ====================
+  setup:
+    desc: Setup the project (install dependencies, pre-commit, env)
+    cmds:
+      - task: install
+      - uv run pre-commit install
+      - cp -n .env.example .env || true
+
+  install:
+    desc: Install dependencies for both backend and frontend
+    cmds:
+      - task: be:install
+      - task: fe:install
+
+  be:install:
+    desc: Install backend dependencies (and workspace tools)
+    cmds:
+      - uv sync
+
+  clean:
+    desc: Clean up all cache and temporary files
+    cmds:
+      - find . -type d -name "__pycache__" -exec rm -rf {} +
+      - find . -type d -name ".pytest_cache" -exec rm -rf {} +
+      - find . -type d -name ".mypy_cache" -exec rm -rf {} +
+      - find . -type d -name ".ruff_cache" -exec rm -rf {} +
+      - find . -type d -name ".coverage" -exec rm -rf {} +
+      - rm -rf frontend/dist frontend/.vite
+
+  # ==================== Start Services ====================
+  start:
+    desc: Start both backend and frontend
+    cmds:
+      - echo "Starting backend and frontend..."
+      - echo "Backend will be at http://localhost:8001"
+      - echo "Frontend will be at http://localhost:5173"
+      - task be:start & task fe:dev
+
+  be:start:
+    desc: Start backend only
+    deps: [start-db]
+    dir: backend
+    cmds:
+      - echo "Waiting for database to be ready..."
+      - |
+        until docker compose exec -T db pg_isready -U user -d ugram > /dev/null 2>&1; do
+          echo "Database is unavailable - sleeping"
+          sleep 1
+        done
+        echo "Database is ready!"
+      - uv run uvicorn src.main:app --reload --port 8001
+
+  be:start:rds:
+    desc: Start backend against the configured RDS database (does not start local db)
+    dir: backend
+    cmds:
+      - |
+        if [ -z "${RDS_DATABASE_URL:-}" ]; then
+          echo "RDS_DATABASE_URL is required for task be:start:rds"
+          exit 1
+        fi
+        export DATABASE_MODE=rds
+        uv run uvicorn src.main:app --reload --port 8001
+
+  start-db:
+    desc: Start the database container
+    dir: backend
+    cmds:
+      - docker compose up -d db
+
+  stop:
+    desc: Stop the backend and database
+    cmds:
+      - task: stop-db
+      - lsof -ti:8001 | xargs kill -9 2>/dev/null || echo "Backend not running"
+
+  stop-db:
+    desc: Stop the database container
+    dir: backend
+    cmds:
+      - docker compose down
+
+  # ==================== Backend Tasks ====================
+  test:
+    desc: Run tests for both backend and frontend (currently only backend)
+    cmds:
+      - task: be:test
+
+  be:test:
+    desc: Run backend tests
+    dir: backend
+    cmds:
+      - uv run python -m pytest
+
+  be:test-docker:
+    desc: Run tests inside Docker container
+    dir: backend
+    cmds:
+      - docker compose run --rm api uv run pytest
+
+  lint:
+    desc: Run linting on both backend and frontend
+    cmds:
+      - task: be:lint
+      - task: fe:lint
+
+  be:lint:
+    desc: Run ruff linting on backend
+    dir: backend
+    cmds:
+      - uv run ruff check .
+
+  fix:
+    desc: Fix all lint and format issues (backend + frontend)
+    cmds:
+      - uv run ruff check --fix backend/src backend/tests
+      - uv run ruff format backend/src backend/tests
+      - cd frontend && npx -y pnpm run lint:fix
+
+  check:
+    desc: Run checks (backend only for now)
+    cmds:
+      - task: be:check
+
+  be:check:
+    desc: Run all backend checks (format-check, lint, test) for CI
+    dir: backend
+    cmds:
+      - uv run ruff format --check .
+      - uv run ruff check .
+      - task: be:test
+
+  # ==================== Database Migrations ====================
+  migrate:
+    desc: Apply all pending database migrations
+    dir: backend
+    cmds:
+      - uv run alembic upgrade head
+
+  migrate:create:
+    desc: Create a new migration (auto-generate from models)
+    dir: backend
+    cmds:
+      - uv run alembic revision --autogenerate -m "{{.CLI_ARGS}}"
+
+  migrate:create-empty:
+    desc: Create an empty migration (manual)
+    dir: backend
+    cmds:
+      - uv run alembic revision -m "{{.CLI_ARGS}}"
+
+  migrate:rollback:
+    desc: Rollback the last migration
+    dir: backend
+    cmds:
+      - uv run alembic downgrade -1
+
+  migrate:status:
+    desc: Show current migration status
+    dir: backend
+    cmds:
+      - uv run alembic current
+
+  migrate:history:
+    desc: Show migration history
+    dir: backend
+    cmds:
+      - uv run alembic history --verbose
+
+  # ==================== Frontend Tasks (fe:*) ====================
+  fe:install:
+    desc: Install frontend dependencies
+    dir: frontend
+    cmds:
+      - npx -y pnpm install
+
+  fe:dev:
+    desc: Start frontend dev server
+    dir: frontend
+    cmds:
+      - npx -y pnpm run dev
+
+  fe:build:
+    desc: Build frontend for production
+    dir: frontend
+    cmds:
+      - npx -y pnpm run build
+
+  fe:build-dev:
+    desc: Build the frontend against the deployed dev backend URL
+    dir: frontend
+    cmds:
+      - VITE_API_URL="$(cd ../infra && (terraform output -raw backend_https_url 2>/dev/null || terraform output -raw backend_url))" npx -y pnpm run build
+
+  fe:build-prod:
+    desc: Build the frontend against the deployed prod backend URL
+    dir: frontend
+    cmds:
+      - VITE_API_URL="$(cd ../infra && (terraform output -raw backend_https_url 2>/dev/null || terraform output -raw backend_url))" npx -y pnpm run build
+
+  fe:preview:
+    desc: Preview frontend production build
+    dir: frontend
+    cmds:
+      - npx -y pnpm run preview
+
+  fe:lint:
+    desc: Run ESLint on frontend
+    dir: frontend
+    cmds:
+      - npx -y pnpm run lint
+
+  fe:format:
+    desc: Run ESLint fix on frontend
+    dir: frontend
+    cmds:
+      - npx -y pnpm run lint:fix
+
+  fe:generate-types:
+    desc: Generate TypeScript types from backend OpenAPI schema
+    dir: frontend
+    cmds:
+      - npx -y pnpm run generate-types
+
+  fe:clean:
+    desc: Clean frontend build artifacts
+    dir: frontend
+    cmds:
+      - rm -rf dist node_modules .vite
+
+  fe:test-e2e:
+    desc: Run E2E tests (Playwright)
+    dir: frontend
+    cmds:
+      - npx playwright test
+
+  fe:test-e2e-install:
+    desc: Install Playwright browsers
+    dir: frontend
+    cmds:
+      - npx playwright install --with-deps chromium
+
+  test:ci-e2e:
+    desc: Run E2E tests exactly as they run in CI
+    cmds:
+      - task start-db
+      - echo "Starting backend in background..."
+      - |
+        # Use a subshell to background the backend with CI env vars
+        (cd backend &&
+         export SECRET_KEY="ci-secret-key-not-for-production-use" &&
+         export ALGORITHM="HS256" &&
+         export ACCESS_TOKEN_EXPIRE_MINUTES="30" &&
+         export DATABASE_MODE="local" &&
+         export LOCAL_DATABASE_URL="postgresql://user:pass@localhost:5433/ugram" &&
+         uv run uvicorn src.main:app --port 8001) &
+      - npx wait-on http://localhost:8001/docs
+      - task fe:test-e2e
+      - task stop-db
+      - echo "CI E2E test emulation complete"
+
+  # ==================== Infrastructure (Terraform) ====================
+  init-dev:
+    desc: Terraform init for dev backend
+    dir: infra
+    cmds:
+      - terraform init -backend-config=backend/dev.hcl -reconfigure
+
+  plan-dev:
+    desc: Terraform plan against dev
+    dir: infra
+    cmds:
+      - task init-dev
+      - |
+        TF_VAR_backend_secret_key_value="$(aws ssm get-parameter --name "/ugram/dev/backend/SECRET_KEY" --with-decryption --query 'Parameter.Value' --output text)"
+        TF_VAR_backend_google_client_secret_value="$(aws ssm get-parameter --name "/ugram/dev/backend/GOOGLE_CLIENT_SECRET" --with-decryption --query 'Parameter.Value' --output text)"
+        BACKEND_IMAGE_TAG="$(aws ssm get-parameter --name "/ugram/dev/backend/IMAGE_TAG" --query 'Parameter.Value' --output text --region "us-east-2" 2>/dev/null || printf 'latest')"
+        export TF_VAR_backend_secret_key_value TF_VAR_backend_google_client_secret_value
+        terraform plan -var-file=dev.tfvars -var "backend_image_tag=${BACKEND_IMAGE_TAG}"
+
+  apply-dev:
+    desc: Terraform apply against dev
+    dir: infra
+    cmds:
+      - task init-dev
+      - |
+        TF_VAR_backend_secret_key_value="$(aws ssm get-parameter --name "/ugram/dev/backend/SECRET_KEY" --with-decryption --query 'Parameter.Value' --output text)"
+        TF_VAR_backend_google_client_secret_value="$(aws ssm get-parameter --name "/ugram/dev/backend/GOOGLE_CLIENT_SECRET" --with-decryption --query 'Parameter.Value' --output text)"
+        BACKEND_IMAGE_TAG="$(aws ssm get-parameter --name "/ugram/dev/backend/IMAGE_TAG" --query 'Parameter.Value' --output text --region "us-east-2" 2>/dev/null || printf 'latest')"
+        export TF_VAR_backend_secret_key_value TF_VAR_backend_google_client_secret_value
+        if [ "${TF_AUTO_APPROVE:-}" = "true" ]; then
+          terraform apply -auto-approve -var-file=dev.tfvars -var "backend_image_tag=${BACKEND_IMAGE_TAG}"
+        else
+          terraform apply -var-file=dev.tfvars -var "backend_image_tag=${BACKEND_IMAGE_TAG}"
+        fi
+
+  be:ensure-ecr-dev:
+    desc: Create the dev backend ECR repository before pushing the image
+    cmds:
+      - aws ecr describe-repositories --repository-names "ugram-backend-dev" --region "us-east-2" >/dev/null 2>&1 || aws ecr create-repository --repository-name "ugram-backend-dev" --image-tag-mutability MUTABLE --image-scanning-configuration scanOnPush=true --region "us-east-2" >/dev/null
+
+  be:ecr-login-dev:
+    desc: Log Docker into the dev backend ECR registry
+    cmds:
+      - task: be:ensure-ecr-dev
+      - |
+        AWS_REGION="${AWS_REGION:-us-east-2}"
+        AWS_ACCOUNT_ID="$(aws sts get-caller-identity --query 'Account' --output text)"
+        aws ecr get-login-password --region "${AWS_REGION}" | docker login --username AWS --password-stdin "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+
+  be:ecr-push-dev:
+    desc: Build and push the backend Docker image to the dev ECR repository
+    cmds:
+      - task: be:ecr-login-dev
+      - |
+        IMAGE_TAG="{{.IMAGE_TAG}}"
+        if [ -z "${IMAGE_TAG}" ]; then
+          IMAGE_TAG="latest"
+        fi
+        AWS_REGION="${AWS_REGION:-us-east-2}"
+        AWS_ACCOUNT_ID="$(aws sts get-caller-identity --query 'Account' --output text)"
+        IMAGE_URI="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/ugram-backend-dev"
+        docker buildx build --platform linux/arm64 --provenance=false \
+          -t "${IMAGE_URI}:${IMAGE_TAG}" \
+          -t "${IMAGE_URI}:latest" \
+          --push ./backend
+
+  deploy-backend-dev:
+    desc: Push the backend image to ECR and re-apply the dev Elastic Beanstalk environment
+    cmds:
+      - |
+        IMAGE_TAG="$(git rev-parse --short=12 HEAD)"
+        echo "Deploying dev backend image tag ${IMAGE_TAG}"
+        task be:ecr-push-dev IMAGE_TAG="${IMAGE_TAG}"
+        aws ssm put-parameter --name "/ugram/dev/backend/IMAGE_TAG" --type String --value "${IMAGE_TAG}" --overwrite --region "us-east-2" >/dev/null
+      - task: apply-dev
+
+  fe:upload-dev:
+    desc: Upload the built frontend to the dev S3 bucket and invalidate CloudFront
+    cmds:
+      - task: init-dev
+      - aws s3 sync frontend/dist/ "s3://$(cd infra && terraform output -raw frontend_bucket_name)" --delete
+      - aws cloudfront create-invalidation --distribution-id "$(cd infra && terraform output -raw frontend_cloudfront_distribution_id)" --paths "/*"
+
+  deploy-frontend-dev:
+    desc: Build the frontend against the dev backend, upload it to S3, and invalidate CloudFront
+    cmds:
+      - task: fe:build-dev
+      - task: fe:upload-dev
+
+  deploy-dev:
+    desc: Deploy the full dev stack (infra, backend, and frontend)
+    cmds:
+      - task: deploy-backend-dev
+      - task: deploy-frontend-dev
+      - echo "Backend deployed at $(cd infra && (terraform output -raw backend_https_url 2>/dev/null || terraform output -raw backend_url))"
+      - echo "Frontend deployed at $(cd infra && terraform output -raw frontend_url)"
+
+  fmt-dev:
+    desc: Terraform fmt for infra
+    dir: infra
+    cmds:
+      - terraform fmt -recursive
+
+  init-prod:
+    desc: Terraform init for prod backend
+    dir: infra
+    cmds:
+      - terraform init -backend-config=backend/prod.hcl -reconfigure
+
+  plan-prod:
+    desc: Terraform plan against prod (requires prod credentials)
+    dir: infra
+    cmds:
+      - task init-prod
+      - |
+        TF_VAR_backend_secret_key_value="$(aws ssm get-parameter --name "/ugram/prod/backend/SECRET_KEY" --with-decryption --query 'Parameter.Value' --output text)"
+        TF_VAR_backend_google_client_secret_value="$(aws ssm get-parameter --name "/ugram/prod/backend/GOOGLE_CLIENT_SECRET" --with-decryption --query 'Parameter.Value' --output text)"
+        BACKEND_IMAGE_TAG="$(aws ssm get-parameter --name "/ugram/prod/backend/IMAGE_TAG" --query 'Parameter.Value' --output text --region "us-east-2" 2>/dev/null || printf 'latest')"
+        export TF_VAR_backend_secret_key_value TF_VAR_backend_google_client_secret_value
+        terraform plan -var-file=prod.tfvars -var "backend_image_tag=${BACKEND_IMAGE_TAG}"
+
+  apply-prod:
+    desc: Terraform apply against prod
+    dir: infra
+    cmds:
+      - task init-prod
+      - |
+        TF_VAR_backend_secret_key_value="$(aws ssm get-parameter --name "/ugram/prod/backend/SECRET_KEY" --with-decryption --query 'Parameter.Value' --output text)"
+        TF_VAR_backend_google_client_secret_value="$(aws ssm get-parameter --name "/ugram/prod/backend/GOOGLE_CLIENT_SECRET" --with-decryption --query 'Parameter.Value' --output text)"
+        BACKEND_IMAGE_TAG="$(aws ssm get-parameter --name "/ugram/prod/backend/IMAGE_TAG" --query 'Parameter.Value' --output text --region "us-east-2" 2>/dev/null || printf 'latest')"
+        export TF_VAR_backend_secret_key_value TF_VAR_backend_google_client_secret_value
+        if [ "${TF_AUTO_APPROVE:-}" = "true" ]; then
+          terraform apply -auto-approve -var-file=prod.tfvars -var "backend_image_tag=${BACKEND_IMAGE_TAG}"
+        else
+          terraform apply -var-file=prod.tfvars -var "backend_image_tag=${BACKEND_IMAGE_TAG}"
+        fi
+
+  be:ensure-ecr-prod:
+    desc: Create the prod backend ECR repository before pushing the image
+    cmds:
+      - aws ecr describe-repositories --repository-names "ugram-backend-prod" --region "us-east-2" >/dev/null 2>&1 || aws ecr create-repository --repository-name "ugram-backend-prod" --image-tag-mutability MUTABLE --image-scanning-configuration scanOnPush=true --region "us-east-2" >/dev/null
+
+  be:ecr-login-prod:
+    desc: Log Docker into the prod backend ECR registry
+    cmds:
+      - task: be:ensure-ecr-prod
+      - |
+        AWS_REGION="${AWS_REGION:-us-east-2}"
+        AWS_ACCOUNT_ID="$(aws sts get-caller-identity --query 'Account' --output text)"
+        aws ecr get-login-password --region "${AWS_REGION}" | docker login --username AWS --password-stdin "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+
+  be:ecr-push-prod:
+    desc: Build and push the backend Docker image to the prod ECR repository
+    cmds:
+      - task: be:ecr-login-prod
+      - |
+        IMAGE_TAG="{{.IMAGE_TAG}}"
+        if [ -z "${IMAGE_TAG}" ]; then
+          IMAGE_TAG="latest"
+        fi
+        AWS_REGION="${AWS_REGION:-us-east-2}"
+        AWS_ACCOUNT_ID="$(aws sts get-caller-identity --query 'Account' --output text)"
+        IMAGE_URI="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/ugram-backend-prod"
+        docker buildx build --platform linux/arm64 --provenance=false \
+          -t "${IMAGE_URI}:${IMAGE_TAG}" \
+          -t "${IMAGE_URI}:latest" \
+          --push ./backend
+
+  deploy-backend-prod:
+    desc: Push the backend image to ECR and re-apply the prod Elastic Beanstalk environment
+    cmds:
+      - |
+        IMAGE_TAG="$(git rev-parse --short=12 HEAD)"
+        echo "Deploying prod backend image tag ${IMAGE_TAG}"
+        task be:ecr-push-prod IMAGE_TAG="${IMAGE_TAG}"
+        aws ssm put-parameter --name "/ugram/prod/backend/IMAGE_TAG" --type String --value "${IMAGE_TAG}" --overwrite --region "us-east-2" >/dev/null
+      - task: apply-prod
+
+  fe:upload-prod:
+    desc: Upload the built frontend to the prod S3 bucket and invalidate CloudFront
+    cmds:
+      - task: init-prod
+      - aws s3 sync frontend/dist/ "s3://$(cd infra && terraform output -raw frontend_bucket_name)" --delete
+      - aws cloudfront create-invalidation --distribution-id "$(cd infra && terraform output -raw frontend_cloudfront_distribution_id)" --paths "/*"
+
+  deploy-frontend-prod:
+    desc: Build the frontend against the prod backend, upload it to S3, and invalidate CloudFront
+    cmds:
+      - task: fe:build-prod
+      - task: fe:upload-prod

@@ -1,0 +1,64 @@
+[project]
+name = "webdevinstagram"
+version = "0.3.0"
+description = "Web Development Instagram Project Workspace"
+requires-python = ">=3.13"
+dependencies = [
+    "alembic>=1.18.4",
+    "sse-starlette>=3.3.4",
+]
+
+[tool.uv.workspace]
+members = ["backend"]
+
+[tool.coverage.run]
+source = ["src"]
+branch = true
+relative_files = true
+
+[tool.coverage.report]
+show_missing = true
+
+
+[tool.commitizen]
+name = "cz_conventional_commits"
+tag_format = "v$version"
+version_scheme = "semver"
+version_provider = "pep621"
+update_changelog_on_bump = true
+major_version_zero = true
+
+[tool.ruff]
+line-length = 120
+target-version = "py313"
+# Core rules only - E(errors), F(pyflakes), I(imports), UP(upgrades)
+# Removed: N(naming), B(bugbear), A(builtins), C4(comprehensions), SIM(simplify), ARG(unused args), ANN(annotations)
+lint.select = ["E", "F", "I", "UP"]
+lint.ignore = ["E501"]  # Line too long - let formatter handle it
+
+[tool.mypy]
+python_version = "3.13"
+# Relaxed settings - strict mode disabled
+warn_return_any = false
+warn_unused_configs = true
+disallow_untyped_defs = false
+check_untyped_defs = true
+ignore_missing_imports = true
+
+[dependency-groups]
+dev = [
+    "bandit>=1.9.2",
+    "detect-secrets>=1.5.0",
+    "pip-audit>=2.7.3",
+    "vulture>=2.11",
+    "commitizen>=4.11.3",
+    "httpx>=0.28.1",
+    "moto[s3]>=5.0.0",
+    "mypy>=1.19.1",
+    "pre-commit>=4.5.1",
+    "pytest>=9.0.3",
+    "pytest-asyncio>=1.3.0",
+    "pytest-cov>=7.0.0",
+    "python-dotenv>=1.2.2",
+    "ruff>=0.14.11",
+]

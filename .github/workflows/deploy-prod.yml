@@ -1,0 +1,53 @@
+name: deploy-prod
+
+on:
+  release:
+    types:
+      - published
+
+jobs:
+  deploy-prod:
+    runs-on: ubuntu-latest
+    concurrency: deploy-prod
+    permissions:
+      contents: read
+    env:
+      TF_AUTO_APPROVE: "true"
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Install Task
+        run: sudo sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b /usr/local/bin
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.9.7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Install frontend dependencies
+        run: task fe:install
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Deploy backend prod
+        run: task deploy-backend-prod
+
+      - name: Deploy frontend prod
+        run: task deploy-frontend-prod
