@@ -18,7 +18,7 @@ jobs:
       TF_AUTO_APPROVE: "true"
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.merge_commit_sha }}
 
@@ -29,7 +29,7 @@ jobs:
         with:
           terraform_version: 1.9.7
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
 
