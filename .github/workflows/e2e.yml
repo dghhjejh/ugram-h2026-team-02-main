@@ -13,7 +13,7 @@ jobs:
     name: E2E Tests (Playwright)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Prepare environment file
         run: cp .env.example .env
 
@@ -26,7 +26,7 @@ jobs:
         run: uv python install 3.13
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 22
 
